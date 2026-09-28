@@ -29,13 +29,14 @@ openssl req -new -newkey rsa:3072 -x509 -sha256 -days 1825 -noenc \
 # Validate the staged certificate before touching the user's keychain.
 security verify-cert -c "$cert_work_dir/certificate.pem" \
   -r "$cert_work_dir/certificate.pem" -p codeSign
-openssl pkcs12 -export -legacy -name "$identity_name" \
+openssl rand -base64 24 > "$cert_work_dir/import-passphrase"
+openssl pkcs12 -export -legacy -macalg sha1 -name "$identity_name" \
   -inkey "$cert_work_dir/private.pem" -in "$cert_work_dir/certificate.pem" \
-  -out "$cert_work_dir/identity.p12" -passout pass:
+  -out "$cert_work_dir/identity.p12" -passout "file:$cert_work_dir/import-passphrase"
 # The temporary PKCS#12 and key live in a 0700 directory under umask 077.
 # No all-applications ACL, keychain password, or partition-list override is used.
 security import "$cert_work_dir/identity.p12" -k "$keychain_path" -f pkcs12 \
-  -P '' -x -T /usr/bin/codesign
+  -P "$(cat "$cert_work_dir/import-passphrase")" -x -T /usr/bin/codesign
 # User-domain trust, constrained to code signing (not TLS or other policies).
 # macOS may present its own authentication dialog here.
 security add-trusted-cert -r trustRoot -p codeSign -k "$keychain_path" \
