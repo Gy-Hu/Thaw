@@ -1072,6 +1072,7 @@ extension MenuBarItemManager {
         // it from the single-divider desiredFlat and makes the LCS plan
         // spurious divider moves every cycle.
         var sectionUIDs = [MenuBarSection.Name: [String]]()
+        var currentSectionMap = [String: String]()
         for sectionName in [MenuBarSection.Name.visible, .hidden, .alwaysHidden] {
             let sectionItems = items.filter { item in
                 guard isProfileItem(item) else { return false }
@@ -1085,6 +1086,9 @@ extension MenuBarItemManager {
                 "applyProfileLayout: current \(sectionName.logString) has \(sectionItems.count) items: \(sectionItems.map(\.uniqueIdentifier))"
             )
             sectionUIDs[sectionName] = sectionItems.map(\.uniqueIdentifier)
+            for item in sectionItems {
+                currentSectionMap[item.uniqueIdentifier] = sectionKey(for: sectionName)
+            }
         }
         // Flatten with control items at the section boundaries via the shared
         // pure helper, so this path and the log-replay harness build currentFlat
@@ -1784,9 +1788,12 @@ extension MenuBarItemManager {
                 // seen from the divider's own side. recoverParkedHiddenDivider
                 // above rebuilds the divider once the mismatch persists; until
                 // then the LCS pass is the one that can make progress.
-                unenactedMoveCount += 1
+                // Delegate to the section-aware LCS fallback below. This is
+                // not yet a failed move: a healthy collapsed divider also has
+                // an offscreen leading edge, while visible app anchors remain
+                // usable. Actual fallback failures are counted by its loop.
                 MenuBarItemManager.diagLog.warning(
-                    "Profile layout: H_ctrl is parked offscreen (minX=\(freshControl.hidden.bounds.minX)), skipping the per-item boundary moves"
+                    "Profile layout: H_ctrl leading edge is offscreen (minX=\(freshControl.hidden.bounds.minX)); deferring boundary moves to section-aware LCS"
                 )
             } else {
                 // The divider is roughly where it belongs and some items have
@@ -2210,12 +2217,16 @@ extension MenuBarItemManager {
             )
 
             currentFlat.removeAll()
+            currentSectionMap.removeAll()
             for sectionName in [MenuBarSection.Name.visible, .hidden, .alwaysHidden] {
                 let sectionItems = items.filter { item in
                     guard isProfileItem(item) else { return false }
                     return newContext.findSection(for: item) == sectionName
                 }
                 currentFlat.append(contentsOf: sectionItems.map(\.uniqueIdentifier))
+                for item in sectionItems {
+                    currentSectionMap[item.uniqueIdentifier] = sectionKey(for: sectionName)
+                }
             }
         }
 
@@ -2263,7 +2274,8 @@ extension MenuBarItemManager {
             desiredNoControls: desiredNoControls,
             sectionMap: sectionMap,
             unanchorableUIDs: unanchorableUIDs,
-            preferredMoveUIDs: Set(unmanagedUIDs)
+            preferredMoveUIDs: Set(unmanagedUIDs),
+            currentSectionMap: currentSectionMap
         )
 
         guard !plannedMoves.isEmpty else {

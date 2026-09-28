@@ -46,6 +46,7 @@ final class ProfileManager {
     /// ``performSetup(with:)``. Each owns its own notification observer and
     /// removes it when the task ends, so `deinit` only has to cancel them.
     private(set) var screenParametersTask: Task<Void, Never>?
+    private(set) var activeDisplayTask: Task<Void, Never>?
     private(set) var focusFilterActivatedTask: Task<Void, Never>?
     private(set) var focusFilterDeactivatedTask: Task<Void, Never>?
 
@@ -103,11 +104,32 @@ final class ProfileManager {
         // Each observer task is manually owned, so cancel it here. Ending a
         // task runs its defer, which removes its notification observer.
         screenParametersTask?.cancel()
+        activeDisplayTask?.cancel()
         focusFilterActivatedTask?.cancel()
         focusFilterDeactivatedTask?.cancel()
     }
 
-    /// (Re)starts the three notification observation tasks. The observers
+    /// Poll the WindowServer display identity: screen-parameter notifications
+    /// do not cover ordinary focus changes between already-connected displays.
+    /// Kept separate so the task can be tested without synthetic mouse input.
+    static func observeActiveDisplay(
+        interval: Duration = .milliseconds(500),
+        check: @escaping @MainActor () async -> Void
+    ) -> Task<Void, Never> {
+        Task { @MainActor in
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(for: interval)
+                } catch {
+                    return
+                }
+                guard !Task.isCancelled else { return }
+                await check()
+            }
+        }
+    }
+
+    /// (Re)starts the active-display poller and three notification tasks. The observers
     /// follow the pattern DisplaySettingsManager adopted:
     /// `debouncedNotificationTask` wires a NotificationCenter observer into
     /// an AsyncStream that `.debounce(for:)` coalesces, replacing Combine's
@@ -119,6 +141,11 @@ final class ProfileManager {
     /// Extracted from `performSetup(with:)` — which needs a live `AppState`
     /// — so the wiring stays exercisable in unit tests.
     func startObservationTasks() {
+        activeDisplayTask?.cancel()
+        activeDisplayTask = Self.observeActiveDisplay { [weak self] in
+            await self?.checkDisplayAndAutoSwitch()
+        }
+
         // Listen for display changes to trigger auto-switch.
         screenParametersTask?.cancel()
         screenParametersTask = debouncedNotificationTask(

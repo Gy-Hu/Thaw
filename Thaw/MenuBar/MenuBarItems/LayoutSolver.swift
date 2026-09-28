@@ -1121,16 +1121,27 @@ nonisolated enum LayoutSolver {
         desiredNoControls: [String],
         sectionMap: [String: String],
         unanchorableUIDs: Set<String> = [],
-        preferredMoveUIDs: Set<String> = []
+        preferredMoveUIDs: Set<String> = [],
+        currentSectionMap: [String: String] = [:]
     ) -> [LCSPlannedMove] {
         let currentSetNow = Set(currentNoControls)
         let desiredSetNow = Set(desiredNoControls)
         let lcsCurrent = currentNoControls.filter { desiredSetNow.contains($0) }
         let lcsDesired = desiredNoControls.filter { currentSetNow.contains($0) }
 
+        // A stable relative order does not imply a correct section. Dividers
+        // were removed from these sequences, so A | B C and A B | C otherwise
+        // produce the same LCS. An item in the wrong section must move and must
+        // not be used as a stable anchor until its own move has been planned.
+        let wrongSectionUIDs = Set(lcsDesired.filter { uid in
+            guard let current = currentSectionMap[uid], let desired = sectionMap[uid] else {
+                return false
+            }
+            return current != desired
+        })
         let lcsItems = longestCommonSubsequence(
-            lcsCurrent,
-            lcsDesired,
+            lcsCurrent.filter { !wrongSectionUIDs.contains($0) },
+            lcsDesired.filter { !wrongSectionUIDs.contains($0) },
             preferredMoveUIDs: preferredMoveUIDs
         )
         let itemsToMove = lcsDesired.filter { !lcsItems.contains($0) }

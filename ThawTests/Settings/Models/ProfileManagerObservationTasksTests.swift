@@ -29,12 +29,13 @@ struct ProfileManagerObservationTasksTests {
         try body(ProfileManager(profilesDirectory: tmp))
     }
 
-    @Test("Starting observation starts all three tasks")
-    func startingObservationStartsAllThreeTasks() throws {
+    @Test("Starting observation starts all observation tasks")
+    func startingObservationStartsAllObservationTasks() throws {
         try withManager { manager in
             manager.startObservationTasks()
 
             #expect(manager.screenParametersTask != nil)
+            #expect(manager.activeDisplayTask != nil)
             #expect(manager.focusFilterActivatedTask != nil)
             #expect(manager.focusFilterDeactivatedTask != nil)
         }
@@ -44,6 +45,7 @@ struct ProfileManagerObservationTasksTests {
     func repeatedSetupCancelsThePreviousTasks() throws {
         try withManager { manager in
             manager.startObservationTasks()
+            let poller = try #require(manager.activeDisplayTask)
             let first = try #require(manager.screenParametersTask)
             let activated = try #require(manager.focusFilterActivatedTask)
             let deactivated = try #require(manager.focusFilterDeactivatedTask)
@@ -51,6 +53,7 @@ struct ProfileManagerObservationTasksTests {
             manager.startObservationTasks()
 
             #expect(first.isCancelled)
+            #expect(poller.isCancelled)
             #expect(activated.isCancelled)
             #expect(deactivated.isCancelled)
             #expect(manager.screenParametersTask != nil)
