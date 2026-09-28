@@ -44,10 +44,8 @@ final nonisolated class Listener: @unchecked Sendable {
                 return .start
             case let .configureLogging(filePath):
                 // Only attach to files inside the app's approved log
-                // directory. The path arrives from the XPC peer, and in
-                // teamless (ad-hoc) builds the listener has no peer
-                // requirement, so an arbitrary path could otherwise make
-                // this service open and append to any user-writable file.
+                // directory, independently of peer authentication. A malformed
+                // request must not redirect diagnostic output to another file.
                 let requested = URL(fileURLWithPath: filePath)
                     .standardizedFileURL.resolvingSymlinksInPath()
                 let approvedDir = DiagnosticLogger.shared.logDirectory
@@ -87,9 +85,7 @@ final nonisolated class Listener: @unchecked Sendable {
     ///
     /// Session peers must be signed with the same team identifier as the
     /// service process. Builds signed without a team identifier
-    /// (ad-hoc/personal builds) activate without a peer requirement, since
-    /// `.isFromSameTeam()` can never be satisfied there and every session
-    /// would be cancelled before the first message.
+    /// (ad-hoc/personal builds) pin the containing application's code hash.
     func activate() {
         guard xpcListener == nil else {
             diagLog.notice("Listener is already active")
@@ -100,11 +96,15 @@ final nonisolated class Listener: @unchecked Sendable {
 
         do {
             if CodeSigningInfo.processTeamIdentifier == nil {
-                diagLog.notice("Listener: no team identifier (ad-hoc build), activating without peer requirement")
-                xpcListener = try XPCListener(service: name) { self.acceptSession($0) }
-                diagLog.warning(
-                    "Listener is active WITHOUT peer validation (ad-hoc/teamless build): any local process may connect"
+                let applicationURL = Bundle.main.bundleURL
+                    .deletingLastPathComponent()
+                    .deletingLastPathComponent()
+                    .deletingLastPathComponent()
+                let requirement = try CodeSigningInfo.pinnedPeerRequirement(
+                    at: applicationURL, identifier: "com.stonerl.Thaw"
                 )
+                xpcListener = try XPCListener(service: name, requirement: requirement) { self.acceptSession($0) }
+                diagLog.notice("Listener: local-build peer pinned to the containing application's code hash")
             } else {
                 xpcListener = try XPCListener(service: name, requirement: .isFromSameTeam()) { self.acceptSession($0) }
             }

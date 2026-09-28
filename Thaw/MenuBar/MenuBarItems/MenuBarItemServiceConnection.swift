@@ -130,11 +130,16 @@ extension MenuBarItemService {
                     // Same-team peer validation can never pass in a build signed
                     // without a team identifier (ad-hoc/personal builds) — every
                     // send would fail with "Peer forbidden (code signing)".
-                    // Mirrors the teamless fallback in the service's Listener.
+                    // Local builds authenticate the bundled service by hash.
                     if CodeSigningInfo.processTeamIdentifier != nil {
                         newSession.setPeerRequirement(.isFromSameTeam())
                     } else {
-                        diagLog.notice("getOrCreateSession: no team identifier (ad-hoc build), skipping peer requirement")
+                        let serviceURL = Bundle.main.bundleURL
+                            .appendingPathComponent("Contents/XPCServices/MenuBarItemService.xpc")
+                        newSession.setPeerRequirement(try CodeSigningInfo.pinnedPeerRequirement(
+                            at: serviceURL, identifier: name
+                        ))
+                        diagLog.notice("getOrCreateSession: local-build peer pinned to the bundled service's code hash")
                     }
                     newSession.setTargetQueue(queue)
                     // Populated before activate(): a session cancelled right
