@@ -48,13 +48,28 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild build-for-te
 
 ## Build and install
 
+Use a fixed local signing identity so privacy grants can survive ordinary
+updates. The one-time setup adds a non-extractable key to the login keychain,
+allows `/usr/bin/codesign` to use it, and trusts the certificate for **code signing
+only** in the current user's trust domain. It does not add TLS trust or change TCC.
+Approve this one-time system change before running:
+
 ```sh
+scripts/setup-local-signing.sh
 scripts/build-local-display-fix.sh > build/local-build.log 2>&1
 ```
 
+macOS controls whether its authentication dialog accepts Touch ID or asks for a
+password. A biometric prompt alone cannot grant Accessibility or Screen Recording.
+The first switch from ad-hoc signing to the fixed identity still requires granting
+those permissions again. Retain the certificate/private key and the bundle ID on
+subsequent builds; this avoids changing identity on every rebuild. macOS may still
+request consent under its own permission policies.
+
 Output: `build/DerivedData/Build/Products/Release/Thaw.app`, version
-`2.0.1-local.2`. This local app uses ad-hoc signing because a Developer ID
-certificate is not required for a personal build. It is not notarized.
+`2.0.1-local.2`. This personal build uses `Thaw Local Code Signing` by default
+(or `THAW_SIGNING_IDENTITY` if explicitly supplied). It is not notarized. The build
+script refuses to fall back to ad-hoc signing when the identity is missing.
 
 Before replacement, archive the installed `.app` as a ZIP (to avoid duplicate app registration), the `com.stonerl.Thaw`
 preferences and `~/Library/Application Support/Thaw`. Quit Thaw, replace the app,
