@@ -46,12 +46,15 @@ final class ProfileManager {
     /// ``performSetup(with:)``. Each owns its own notification observer and
     /// removes it when the task ends, so `deinit` only has to cancel them.
     private(set) var screenParametersTask: Task<Void, Never>?
-    private(set) var activeDisplayTask: Task<Void, Never>?
     private(set) var focusFilterActivatedTask: Task<Void, Never>?
     private(set) var focusFilterDeactivatedTask: Task<Void, Never>?
 
-    /// Tracks the last seen active display UUID for auto-switch debouncing.
-    var lastActiveDisplayUUID: String?
+    var externalDisplayProfileID: UUID? {
+        didSet { Defaults.store.set(externalDisplayProfileID?.uuidString, forKey: "ExternalDisplayProfileID") }
+    }
+    var builtInDisplayProfileID: UUID? {
+        didSet { Defaults.store.set(builtInDisplayProfileID?.uuidString, forKey: "BuiltInDisplayProfileID") }
+    }
     /// Whether a Focus Filter profile is currently applied.
     var focusFilterActive = false
     /// The in-flight layout apply task. Exposed for callers that need to
@@ -71,6 +74,8 @@ final class ProfileManager {
     ///   temporary directory to exercise the real load/save paths in isolation
     ///   without touching the user's profiles.
     init(profilesDirectory: URL? = nil) {
+        externalDisplayProfileID = Defaults.store.string(forKey: "ExternalDisplayProfileID").flatMap(UUID.init(uuidString:))
+        builtInDisplayProfileID = Defaults.store.string(forKey: "BuiltInDisplayProfileID").flatMap(UUID.init(uuidString:))
         let enc = JSONEncoder()
         enc.dateEncodingStrategy = .iso8601
         enc.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -104,48 +109,13 @@ final class ProfileManager {
         // Each observer task is manually owned, so cancel it here. Ending a
         // task runs its defer, which removes its notification observer.
         screenParametersTask?.cancel()
-        activeDisplayTask?.cancel()
         focusFilterActivatedTask?.cancel()
         focusFilterDeactivatedTask?.cancel()
     }
 
-    /// Poll the WindowServer display identity: screen-parameter notifications
-    /// do not cover ordinary focus changes between already-connected displays.
-    /// Kept separate so the task can be tested without synthetic mouse input.
-    static func observeActiveDisplay(
-        interval: Duration = .milliseconds(500),
-        check: @escaping @MainActor () async -> Void
-    ) -> Task<Void, Never> {
-        Task { @MainActor in
-            while !Task.isCancelled {
-                do {
-                    try await Task.sleep(for: interval)
-                } catch {
-                    return
-                }
-                guard !Task.isCancelled else { return }
-                await check()
-            }
-        }
-    }
-
-    /// (Re)starts the active-display poller and three notification tasks. The observers
-    /// follow the pattern DisplaySettingsManager adopted:
-    /// `debouncedNotificationTask` wires a NotificationCenter observer into
-    /// an AsyncStream that `.debounce(for:)` coalesces, replacing Combine's
-    /// `.debounce(for:scheduler:)`.
-    ///
-    /// A repeated setup must not leave the previous task, and the observer
-    /// its defer owns, running; hence the cancel before each assignment.
-    ///
-    /// Extracted from `performSetup(with:)` — which needs a live `AppState`
-    /// — so the wiring stays exercisable in unit tests.
+    /// Observe topology changes. Mouse movement and window focus are not
+    /// profile-switch triggers because all displays share the system bar.
     func startObservationTasks() {
-        activeDisplayTask?.cancel()
-        activeDisplayTask = Self.observeActiveDisplay { [weak self] in
-            await self?.checkDisplayAndAutoSwitch()
-        }
-
         // Listen for display changes to trigger auto-switch.
         screenParametersTask?.cancel()
         screenParametersTask = debouncedNotificationTask(
@@ -153,7 +123,7 @@ final class ProfileManager {
             name: NSApplication.didChangeScreenParametersNotification,
             interval: .seconds(1.5)
         ) { [weak self] in
-            await self?.checkDisplayAndAutoSwitch()
+            await self?.checkConnectedDisplaysAndAutoSwitch()
         }
 
         // Listen for Focus Filter activation from the system.

@@ -1,6 +1,39 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Use one profile on all displays while an external display is connected. Window focus does not switch profiles.": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "连接外置显示器时，所有屏幕统一使用同一配置。切换窗口或鼠标焦点不会切换配置。"
+          }
+        }
+      }
+    },
+    "External display connected": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已连接外置显示器时"
+          }
+        }
+      }
+    },
+    "No external display connected": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未连接外置显示器时"
+          }
+        }
+      }
+    },
     "(no script selected)" : {
       "comment" : "A placeholder displayed in the \"Path\" column of a hook row when no script is selected.",
       "localizations" : {

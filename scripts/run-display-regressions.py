@@ -5,6 +5,9 @@ root=Path(__file__).resolve().parents[1]
 pkg=root/'build'/('regression-baseline' if base else 'regression-patched')
 (pkg/'Sources/Core').mkdir(parents=True,exist_ok=True)
 (pkg/'Tests/CoreTests').mkdir(parents=True,exist_ok=True)
+# These are generated harness sources, never the repository source files.
+for folder in [pkg/'Sources/Core', pkg/'Tests/CoreTests']:
+ for generated in folder.glob('*.swift'):generated.unlink()
 def read(path):
  return subprocess.check_output(['git','show','d5eab80b:'+path],cwd=root,text=True) if base else (root/path).read_text()
 def block(s,needle):
@@ -27,12 +30,11 @@ let package = Package(name: "ThawRegression", platforms: [.macOS("26.0")], targe
 for f in ['ThawTests/MenuBar/Layout/PlanLCSMoveSequenceTests.swift','ThawTests/MenuBar/Layout/SectionAwareLCSRegressionTests.swift','ThawTests/MenuBar/Layout/CapturedDisplayTraceTests.swift']:
  (pkg/'Tests/CoreTests'/Path(f).name).write_text((root/f).read_text().replace('@testable import Thaw','@testable import Core'))
 if not base:
- s=(root/'Thaw/Settings/Models/ProfileManager.swift').read_text()
- (pkg/'Sources/Core/Polling.swift').write_text('import Foundation\n@MainActor enum ProfileManager {\n'+block(s,'static func observeActiveDisplay(')+'\n}\n')
+ (pkg/'Sources/Core/DisplayConnectionProfilePolicy.swift').write_text((root/'Thaw/Settings/Models/DisplayConnectionProfilePolicy.swift').read_text())
  (pkg/'Sources/Core/CodeSigningInfo.swift').write_text((root/'Shared/Utilities/CodeSigningInfo.swift').read_text())
  f=root/'ThawTests/Shared/LocalPeerSigningTests.swift'
  (pkg/'Tests/CoreTests'/f.name).write_text(f.read_text().replace('@testable import Thaw','@testable import Core'))
- f=root/'ThawTests/Settings/Models/ActiveDisplayPollingTests.swift'
+ f=root/'ThawTests/Settings/Models/DisplayConnectionProfilePolicyTests.swift'
  (pkg/'Tests/CoreTests'/f.name).write_text(f.read_text().replace('@testable import Thaw','@testable import Core'))
 (pkg/'Tests/CoreTests/GeometryTests.swift').write_text('''import Foundation
 import Testing

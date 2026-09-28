@@ -5,9 +5,15 @@ Based on Thaw 2.0.1 (build 56), commit `d5eab80b`. Branch:
 
 ## Changes
 
-- Observe the active menu-bar display every 500 ms. Screen-parameter notifications
-  alone miss focus changes between already-connected displays. Existing UUID
-  deduplication and Focus Filter precedence still apply.
+- Select one global profile from connected displays: any online non-built-in
+  display selects the external rule; built-in-only selects the laptop rule.
+  A transient empty display list preserves the current layout. The same target
+  profile is never reapplied merely because focus or resolution changed.
+- No focus polling. Display-parameter notifications are debounced for 1.5 seconds;
+  startup and leaving a Focus Filter also evaluate the connection rule.
+- Configure the two rules in Settings > Profiles > Auto-Switch. They are stored
+  as profile IDs (`ExternalDisplayProfileID` and `BuiltInDisplayProfileID`), so
+  renaming a profile does not break its rule. A missing rule/profile does nothing.
 - Feed current section membership to the LCS fallback. A relative order can remain
   unchanged while an item must move from hidden to visible, or the reverse.
   Misplaced items cannot be kept as stable anchors before their own move.
@@ -47,10 +53,10 @@ scripts/build-local-display-fix.sh > build/local-build.log 2>&1
 ```
 
 Output: `build/DerivedData/Build/Products/Release/Thaw.app`, version
-`2.0.1-local.1`. This local app uses ad-hoc signing because a Developer ID
+`2.0.1-local.2`. This local app uses ad-hoc signing because a Developer ID
 certificate is not required for a personal build. It is not notarized.
 
-Before replacement, back up the installed `.app`, the `com.stonerl.Thaw`
+Before replacement, archive the installed `.app` as a ZIP (to avoid duplicate app registration), the `com.stonerl.Thaw`
 preferences and `~/Library/Application Support/Thaw`. Quit Thaw, replace the app,
 and reopen it. macOS may require the user to grant Accessibility/Screen Recording
 again because the signing identity differs. Do not alter the TCC database or
@@ -62,6 +68,16 @@ the backup. To roll back, quit the local app, restore the original app and saved
 preferences/profile files, and launch the original app.
 
 ## Scope and limitations
+
+This uses the same native menu-bar layout on every display. It does not provide
+independent simultaneous native layouts. While an external display is attached,
+clicking the laptop's screen does not select the laptop profile. Disconnecting
+the final external display selects the laptop profile.
+
+For a fixed external layout, turn off menu-bar item overflow in that profile so
+notch-based automatic rearrangement does not override it when the built-in screen
+gets focus. A smaller screen may not physically fit every item; it still shares
+the same logical layout. Focus Filter profiles retain their existing priority.
 
 A complete build and function-level tests do not establish that WindowServer
 will accept every live drag. Verify both directions of a real display switch,

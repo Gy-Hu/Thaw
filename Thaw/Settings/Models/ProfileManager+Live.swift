@@ -24,7 +24,6 @@ extension ProfileManager {
     /// after the menu bar has settled.
     func performSetup(with appState: AppState) {
         self.appState = appState
-        lastActiveDisplayUUID = Bridging.getActiveMenuBarDisplayUUID()
         rebuildProfileHotkeys()
 
         // Before anything can apply a profile. Once per build, because each
@@ -61,9 +60,7 @@ extension ProfileManager {
             // display whose profile has a different offset than the last
             // session left on-disk, the relaunch must happen here or the
             // apps will continue rendering with the wrong spacing.
-            if let currentUUID = lastActiveDisplayUUID {
-                await self.applyProfileForDisplay(uuid: currentUUID)
-            }
+            await self.checkConnectedDisplaysAndAutoSwitch()
         }
     }
 
@@ -433,22 +430,28 @@ extension ProfileManager {
 
     // MARK: - Auto-Switch
 
-    /// Called when the active menu bar display changes. Finds a profile
-    /// associated with the new active display and applies it.
-    /// Skipped when a Focus Filter profile is currently active.
-    ///
-    /// Internal rather than private because `startObservationTasks()` — which
-    /// stays in the measured file so its wiring remains testable — installs
-    /// the closure that calls it.
-    func checkDisplayAndAutoSwitch() async {
-        guard let currentUUID = Bridging.getActiveMenuBarDisplayUUID() else { return }
-        guard currentUUID != lastActiveDisplayUUID else { return }
-        lastActiveDisplayUUID = currentUUID
+    /// Read all online displays, including mirrored external displays. During
+    /// an empty/transitional snapshot, retain the current layout.
+    private func connectedDisplayState() -> DisplayConnectionProfilePolicy.ConnectionState? {
+        var count: UInt32 = 0
+        guard CGGetOnlineDisplayList(0, nil, &count) == .success, count > 0 else { return nil }
+        var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
+        guard CGGetOnlineDisplayList(count, &ids, &count) == .success else { return nil }
+        return DisplayConnectionProfilePolicy.connectionState(
+            displayIsBuiltIn: ids.prefix(Int(count)).map { CGDisplayIsBuiltin($0) != 0 }
+        )
+    }
 
-        // Don't override a Focus Filter profile with a display switch.
+    func checkConnectedDisplaysAndAutoSwitch() async {
         guard !focusFilterActive else { return }
-
-        await applyProfileForDisplay(uuid: currentUUID)
+        guard let id = DisplayConnectionProfilePolicy.targetProfileID(
+            state: connectedDisplayState(),
+            externalProfileID: externalDisplayProfileID,
+            builtInProfileID: builtInDisplayProfileID,
+            availableProfileIDs: Set(profiles.map(\.id)),
+            activeProfileID: activeProfileID
+        ) else { return }
+        await applyConnectionProfile(id: id)
     }
 
     /// Applies the profile requested by a Focus Filter activation.
@@ -478,14 +481,12 @@ extension ProfileManager {
     /// Called when the Focus Filter deactivates (Focus mode turned off).
     /// Reverts to the display-based profile.
     ///
-    /// Internal for the same reason as ``checkDisplayAndAutoSwitch()``.
+    /// Internal for the same reason as ``checkConnectedDisplaysAndAutoSwitch()``.
     func handleFocusFilterDeactivated() async {
         guard focusFilterActive else { return }
         focusFilterActive = false
         diagLog.info("Focus Filter deactivated; reverting to display profile")
-        if let uuid = Bridging.getActiveMenuBarDisplayUUID() {
-            await applyProfileForDisplay(uuid: uuid)
-        }
+        await checkConnectedDisplaysAndAutoSwitch()
     }
 
     /// Re-applies the currently active profile, driving its layout pass
@@ -513,15 +514,16 @@ extension ProfileManager {
         }
     }
 
-    /// Applies the profile associated with the given display UUID, if any.
-    private func applyProfileForDisplay(uuid: String) async {
-        guard let meta = profiles.first(where: { $0.associatedDisplayUUID == uuid }) else {
+    /// Apply only when the chosen profile changes. Repeated focus/resolution
+    /// notifications therefore cannot restart the same layout operation.
+    private func applyConnectionProfile(id: UUID) async {
+        guard let meta = profiles.first(where: { $0.id == id }) else {
             return
         }
         guard meta.id != activeProfileID else { return }
         guard let appState else { return }
 
-        diagLog.info("Auto-switching to profile \(meta.name) for display \(uuid)")
+        diagLog.info("Auto-switching to profile \(meta.name) for connected display topology")
         do {
             let profile = try loadProfile(id: meta.id)
             let previousID = activeProfileID

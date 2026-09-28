@@ -252,7 +252,7 @@ struct ProfileSettingsPane: View {
     // MARK: - Auto-Switch
 
     private var autoSwitchInfo: some View {
-        Text("Assign a profile to each display.")
+        Text("Use one profile on all displays while an external display is connected. Window focus does not switch profiles.")
             .font(.callout)
             .foregroundStyle(.secondary)
     }
@@ -273,34 +273,36 @@ struct ProfileSettingsPane: View {
 
     @ViewBuilder
     private var autoSwitchControls: some View {
-        let displays = allKnownDisplays
-        let profileOptions = profileManager.profiles
-
-        ForEach(displays) { display in
-            let binding = Binding<String>(
-                get: {
-                    profileOptions.first(where: { $0.associatedDisplayUUID == display.id })?.id.uuidString ?? ""
-                },
-                set: { newValue in
-                    profileManager.setAssociatedDisplay(uuid: nil, forDisplayUUID: display.id)
-                    if let profileID = UUID(uuidString: newValue) {
-                        profileManager.setAssociatedDisplay(
-                            uuid: display.id,
-                            displayName: display.name,
-                            forProfileID: profileID
-                        )
-                    }
-                }
+        connectionProfilePicker(
+            title: "External display connected",
+            selected: Binding(
+                get: { profileManager.externalDisplayProfileID },
+                set: { profileManager.externalDisplayProfileID = $0 }
             )
+        )
+        connectionProfilePicker(
+            title: "No external display connected",
+            selected: Binding(
+                get: { profileManager.builtInDisplayProfileID },
+                set: { profileManager.builtInDisplayProfileID = $0 }
+            )
+        )
+    }
 
-            IcePicker(selection: binding) {
-                Text("None").tag("")
-                ForEach(profileOptions) { profile in
-                    Text(profile.name).tag(profile.id.uuidString)
-                }
-            } label: {
-                display.localizedLabel
+    private func connectionProfilePicker(title: LocalizedStringKey, selected: Binding<UUID?>) -> some View {
+        IcePicker(selection: Binding<String>(
+            get: { selected.wrappedValue?.uuidString ?? "" },
+            set: { value in
+                selected.wrappedValue = UUID(uuidString: value)
+                Task { await profileManager.checkConnectedDisplaysAndAutoSwitch() }
             }
+        )) {
+            Text("None").tag("")
+            ForEach(profileManager.profiles) { profile in
+                Text(profile.name).tag(profile.id.uuidString)
+            }
+        } label: {
+            Text(title)
         }
     }
 
@@ -460,72 +462,4 @@ struct ProfileSettingsPane: View {
         }
     }
 
-    // MARK: - Display Helpers
-
-    private struct DisplayInfo: Identifiable {
-        let id: String
-        let name: String
-        let hasNotch: Bool
-        let isConnected: Bool
-
-        var localizedLabel: some View {
-            HStack(spacing: 6) {
-                Text(name)
-                if hasNotch {
-                    Text("Notch")
-                        .font(.caption)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(.quaternary)
-                        .clipShape(Capsule())
-                }
-                if !isConnected {
-                    Text("Disconnected")
-                        .font(.caption)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(.quaternary)
-                        .clipShape(Capsule())
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-    }
-
-    /// All displays relevant to auto-switch: connected displays plus any
-    /// disconnected displays that still have a profile association.
-    private var allKnownDisplays: [DisplayInfo] {
-        let knownDisplays = appState.settings.displaySettings.knownDisplays
-        var displays = NSScreen.screens.compactMap { screen -> DisplayInfo? in
-            guard let uuid = Bridging.getDisplayUUIDString(for: screen.displayID) else {
-                return nil
-            }
-            return DisplayInfo(
-                id: uuid,
-                name: screen.localizedName,
-                hasNotch: screen.hasNotch,
-                isConnected: true
-            )
-        }
-
-        let connectedIDs = Set(displays.map(\.id))
-        // Multiple profiles can share an associated display; track the UUIDs
-        // already appended so ForEach receives unique identities.
-        var seenUUIDs = connectedIDs
-        for profile in profileManager.profiles {
-            guard let uuid = profile.associatedDisplayUUID,
-                  !seenUUIDs.contains(uuid)
-            else { continue }
-            seenUUIDs.insert(uuid)
-            let cachedName = profile.associatedDisplayName ?? uuid
-            displays.append(DisplayInfo(
-                id: uuid,
-                name: cachedName,
-                hasNotch: knownDisplays[uuid]?.hasNotch ?? false,
-                isConnected: false
-            ))
-        }
-
-        return displays
-    }
 }
